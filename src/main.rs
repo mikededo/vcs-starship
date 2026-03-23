@@ -51,7 +51,7 @@ struct Cli {
     #[arg(long, global = true)]
     strip_bookmark_prefix: Option<String>,
 
-    /// Symbol prefix for JJ repos (default: "󱗆")
+    /// Symbol prefix for JJ repos (default: "∂")
     #[arg(long, global = true)]
     jj_symbol: Option<String>,
 
