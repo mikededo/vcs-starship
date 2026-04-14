@@ -40,7 +40,7 @@ impl DisplayConfig {
 pub struct Config {
     /// Max length for branch/bookmark name (0 = unlimited)
     pub truncate_name: usize,
-    /// Length of `change_id/commit` hash to display
+    /// Length of Git commit hash to display; JJ uses its shortest prefix
     pub id_length: usize,
     /// Max depth to search for ancestor bookmarks (0 = disabled, default: 10)
     pub ancestor_bookmark_depth: usize,

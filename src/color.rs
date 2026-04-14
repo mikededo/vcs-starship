@@ -8,7 +8,6 @@ pub const RED: &str = "\x1b[38;2;237;135;150m"; // red
 pub const BLUE: &str = "\x1b[38;2;138;173;244m"; // blue
 pub const YELLOW: &str = "\x1b[38;2;238;212;159m"; // yellow
 pub const BRIGHT_MAGENTA: &str = "\x1b[38;2;245;189;230m"; // pink
-pub const BRIGHT_BLACK: &str = "\x1b[38;2;110;115;141m"; // overlay0
 
 // Catppuccin Macchiato palette aliases used by git-style output
 pub const CAT_MAUVE: &str = "\x1b[38;2;198;160;246m";

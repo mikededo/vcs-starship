@@ -35,7 +35,7 @@ struct Cli {
     #[arg(long, global = true)]
     truncate_name: Option<usize>,
 
-    /// Length of `change_id/commit` hash to display (default: 8)
+    /// Length of Git commit hash to display (default: 8; JJ uses shortest prefix)
     #[arg(long, global = true)]
     id_length: Option<usize>,
 
@@ -187,8 +187,7 @@ fn run_prompt(cwd: &Path, config: &Config) -> Option<String> {
     match result.repo_type {
         RepoType::Jj | RepoType::JjColocated => {
             let repo_root = result.repo_root?;
-            let info =
-                jj::collect(&repo_root, config.id_length, config.ancestor_bookmark_depth).ok()?;
+            let info = jj::collect(&repo_root, config.ancestor_bookmark_depth).ok()?;
             Some(output::format_jj(&info, config))
         }
         #[cfg(feature = "git")]

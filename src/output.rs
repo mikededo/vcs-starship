@@ -1,8 +1,8 @@
 //! Output formatting for prompt strings.
 
 use crate::color::{
-    BLUE, BRIGHT_BLACK, BRIGHT_MAGENTA, CAT_GREEN, CAT_MAROON, CAT_MAUVE, CAT_PEACH, CAT_RED,
-    CAT_SUBTEXT0, CAT_YELLOW, GREEN, PURPLE, RED, RESET, YELLOW,
+    BLUE, BRIGHT_MAGENTA, CAT_GREEN, CAT_MAROON, CAT_MAUVE, CAT_PEACH, CAT_RED, CAT_SUBTEXT0,
+    CAT_YELLOW, GREEN, PURPLE, RED, RESET, YELLOW,
 };
 use crate::config::Config;
 #[cfg(feature = "git")]
@@ -19,19 +19,12 @@ fn format_segment(text: &str, color: &str, show_color: bool) -> String {
     }
 }
 
-/// Format `change_id` with unique prefix highlighting (matching jj log style).
-/// Prefix is bright magenta, rest is gray.
-fn format_change_id(change_id: &str, prefix_len: usize, show_prefix_color: bool) -> String {
-    if !show_prefix_color {
-        return change_id.to_string();
-    }
-    let prefix_len = prefix_len.min(change_id.len());
-    let prefix = &change_id[..prefix_len];
-    let rest = &change_id[prefix_len..];
-    if rest.is_empty() {
-        format!("{BRIGHT_MAGENTA}{prefix}{RESET}")
+/// Format shortest `change_id` output with JJ-style prefix coloring.
+fn format_change_id(change_id: &str, show_prefix_color: bool) -> String {
+    if show_prefix_color {
+        format!("{BRIGHT_MAGENTA}{change_id}{RESET}")
     } else {
-        format!("{BRIGHT_MAGENTA}{prefix}{RESET}{BRIGHT_BLACK}{rest}{RESET}")
+        change_id.to_string()
     }
 }
 
@@ -49,11 +42,7 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
     if display.show_id {
         let use_prefix_color = display.show_color && display.show_prefix_color;
         if use_prefix_color {
-            out.push_str(&format_change_id(
-                &info.change_id,
-                info.change_id_prefix_len,
-                true,
-            ));
+            out.push_str(&format_change_id(&info.change_id, true));
         } else {
             out.push_str(&format_segment(&info.change_id, PURPLE, display.show_color));
         }
@@ -261,7 +250,6 @@ mod tests {
     fn jj_format_unchanged_shape() {
         let info = JjInfo {
             change_id: "yzxv1234".into(),
-            change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             empty_desc: false,
             empty_commit: false,
@@ -273,6 +261,12 @@ mod tests {
         let rendered = format_jj(&info, &base_config());
         assert!(rendered.contains("yzxv"));
         assert!(rendered.contains("(main)"));
+    }
+
+    #[test]
+    fn jj_shortest_id_has_no_dimmed_suffix() {
+        let rendered = format_change_id("l", true);
+        assert_eq!(rendered, format!("{BRIGHT_MAGENTA}l{RESET}"));
     }
 
     #[cfg(feature = "git")]

@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::hex_util::encode_reverse_hex;
+use jj_lib::id_prefix::IdPrefixContext;
 use jj_lib::object_id::ObjectId;
 use jj_lib::ref_name::RefName;
 use jj_lib::repo::{Repo, StoreFactories};
@@ -19,10 +20,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct JjInfo {
-    /// Short change ID (8 chars)
+    /// Display-ready shortest change ID prefix
     pub change_id: String,
-    /// Shortest unique prefix length for `change_id`
-    pub change_id_prefix_len: usize,
     /// Bookmarks with distances: vec of (name, distance). Empty if none found.
     /// Distance 0 = directly on WC, 1+ = ancestor distance
     pub bookmarks: Vec<(String, usize)>,
@@ -158,7 +157,7 @@ fn find_ancestor_bookmarks(
 
 /// Collect JJ repo info from the given path
 #[must_use = "returns collected repo info, does not modify state"]
-pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Result<JjInfo> {
+pub fn collect(repo_root: &Path, ancestor_depth: usize) -> Result<JjInfo> {
     let settings = create_user_settings()?;
 
     let workspace = Workspace::load(
@@ -187,12 +186,13 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         .map_err(|e| Error::Jj(format!("get commit: {e}")))?;
 
     let change_id_full = encode_reverse_hex(commit.change_id().as_bytes());
-    let change_id = change_id_full[..id_length.min(change_id_full.len())].to_string();
-
-    let change_id_prefix_len = repo
-        .shortest_unique_change_id_prefix_len(commit.change_id())
-        .unwrap_or(id_length)
-        .min(change_id.len());
+    let change_id_len = IdPrefixContext::default()
+        .populate(repo.as_ref())
+        .map_err(|e| Error::Jj(format!("load change prefix index: {e}")))?
+        .shortest_change_prefix_len(repo.as_ref(), commit.change_id())
+        .unwrap_or(change_id_full.len())
+        .min(change_id_full.len());
+    let change_id = change_id_full[..change_id_len].to_string();
 
     let empty_desc = commit.description().trim().is_empty();
 
@@ -246,7 +246,6 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
 
     Ok(JjInfo {
         change_id,
-        change_id_prefix_len,
         bookmarks,
         empty_desc,
         empty_commit,
@@ -255,4 +254,58 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         has_remote,
         is_synced,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn run_jj(repo_dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("jj")
+            .args(args)
+            .current_dir(repo_dir)
+            .output()
+            .expect("failed to run jj command");
+        assert!(
+            output.status.success(),
+            "jj command failed: jj {args:?}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("jj stdout should be valid UTF-8")
+    }
+
+    #[test]
+    fn collect_matches_jj_shortest_change_id() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo_dir = tmp.path();
+
+        let init_status = Command::new("jj")
+            .args(["git", "init"])
+            .arg(repo_dir)
+            .status()
+            .expect("failed to initialize jj repo");
+        assert!(init_status.success(), "jj git init failed");
+
+        let expected = run_jj(
+            repo_dir,
+            &[
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--ignore-working-copy",
+                "--template",
+                "change_id.shortest()",
+            ],
+        )
+        .trim()
+        .to_string();
+
+        let collected = collect(repo_dir, 0).expect("collect JJ info");
+
+        assert_eq!(collected.change_id, expected);
+    }
 }
