@@ -25,6 +25,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+      - name: Install JJ CLI
+        run: cargo install jj-cli --locked --version 0.37.0
       - name: Run tests
         run: cargo test
 
