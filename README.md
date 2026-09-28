@@ -50,6 +50,7 @@ Hardcoded style contract:
   - ahead `⇡N`, behind `⇣N`, diverged `⇣behind⇡ahead`
   - stashed `*N`
   - renamed `ɍN`
+  - optional line counts `+N -N` (`--lines tracked` or `--lines all`)
 
 Hardcoded Catppuccin Macchiato color names: `mauve`, `yellow`, `peach`, `maroon`, `subtext0`, `red`, `green`.
 
@@ -60,6 +61,11 @@ JJ output keeps jj-starship behavior:
 ```text
 {symbol}{change_id} ({bookmarks}) [{status}]
 ```
+
+`--lines tracked` appends `+N -N` for the snapshotted working-copy change.
+`--lines all` also includes untracked files in Git. In JJ, both modes count
+files in the working-copy snapshot; ignored or unsnapshotted files are excluded.
+The default is `--lines none`, so no diff is calculated unless requested.
 
 ## Commands
 

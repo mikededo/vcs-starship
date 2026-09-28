@@ -1,7 +1,16 @@
 //! Configuration for vcs-starship
 
+use clap::ValueEnum;
 use std::borrow::Cow;
 use std::env;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum LineMode {
+    #[default]
+    None,
+    Tracked,
+    All,
+}
 
 pub const DEFAULT_JJ_SYMBOL: &str = "∂ ";
 pub const DEFAULT_GIT_SYMBOL: &str = " ";
@@ -53,6 +62,8 @@ pub struct Config {
     /// Symbol prefix for Git repos
     #[allow(dead_code)]
     pub git_symbol: Cow<'static, str>,
+    /// Which working-copy lines to count (none by default)
+    pub lines: LineMode,
     /// JJ display options
     pub jj_display: DisplayConfig,
     /// Git display options
@@ -70,6 +81,7 @@ impl Default for Config {
             strip_bookmark_prefix: Vec::new(),
             jj_symbol: Cow::Borrowed(DEFAULT_JJ_SYMBOL),
             git_symbol: Cow::Borrowed(DEFAULT_GIT_SYMBOL),
+            lines: LineMode::None,
             jj_display: DisplayConfig::all_visible(),
             git_display: DisplayConfig::all_visible(),
         }
@@ -118,6 +130,7 @@ impl Config {
         jj_symbol: Option<String>,
         git_symbol: Option<String>,
         no_symbol: bool,
+        lines: LineMode,
         jj_flags: DisplayFlags,
         git_flags: DisplayFlags,
     ) -> Self {
@@ -172,6 +185,7 @@ impl Config {
             strip_bookmark_prefix,
             jj_symbol,
             git_symbol,
+            lines,
             jj_display: jj_flags.into_config("JJ_STARSHIP_NO_JJ"),
             git_display: git_flags.into_config("JJ_STARSHIP_NO_GIT"),
         }

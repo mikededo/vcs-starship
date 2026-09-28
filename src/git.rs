@@ -1,7 +1,8 @@
 //! Git repository info collection using git2.
 
+use crate::config::LineMode;
 use crate::error::{Error, Result};
-use git2::{BranchType, Repository, RepositoryState, Status, StatusOptions};
+use git2::{BranchType, DiffOptions, Repository, RepositoryState, Status, StatusOptions};
 use std::path::Path;
 
 /// Repository state kinds that map to starship's `git_state` labels.
@@ -50,6 +51,8 @@ pub struct GitRepoStateInfo {
 pub struct GitInfo {
     /// Branch name (None if detached)
     pub branch: Option<String>,
+    /// Added and removed lines in staged and unstaged changes, when requested
+    pub lines: Option<(usize, usize)>,
     /// Upstream branch name (None if no upstream or detached)
     pub remote_branch: Option<String>,
     /// Short commit hash
@@ -79,7 +82,7 @@ pub struct GitInfo {
 /// Collect Git repo info from the given path.
 #[must_use = "returns collected repo info, does not modify state"]
 #[allow(clippy::too_many_lines)]
-pub fn collect(repo_root: &Path, id_length: usize) -> Result<GitInfo> {
+pub fn collect(repo_root: &Path, id_length: usize, line_mode: LineMode) -> Result<GitInfo> {
     let mut repo = Repository::open(repo_root).map_err(|e| Error::Git(format!("open: {e}")))?;
 
     let mut opts = StatusOptions::new();
@@ -134,6 +137,10 @@ pub fn collect(repo_root: &Path, id_length: usize) -> Result<GitInfo> {
     }
 
     drop(statuses);
+    let lines = match line_mode {
+        LineMode::None => None,
+        LineMode::Tracked | LineMode::All => Some(collect_lines(&repo, line_mode)?),
+    };
     let stashed = collect_stash_count(&mut repo);
     let repo_state = detect_repo_state(&repo);
 
@@ -146,6 +153,7 @@ pub fn collect(repo_root: &Path, id_length: usize) -> Result<GitInfo> {
 
         return Ok(GitInfo {
             branch,
+            lines,
             remote_branch: None,
             head_short: "empty".into(),
             staged,
@@ -186,6 +194,7 @@ pub fn collect(repo_root: &Path, id_length: usize) -> Result<GitInfo> {
 
     Ok(GitInfo {
         branch,
+        lines,
         remote_branch,
         head_short,
         staged,
@@ -199,6 +208,31 @@ pub fn collect(repo_root: &Path, id_length: usize) -> Result<GitInfo> {
         behind,
         repo_state,
     })
+}
+
+fn collect_lines(repo: &Repository, mode: LineMode) -> Result<(usize, usize)> {
+    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let staged = repo
+        .diff_tree_to_index(head_tree.as_ref(), None, None)
+        .and_then(|diff| diff.stats())
+        .map_err(|e| Error::Git(format!("staged diff: {e}")))?;
+
+    let mut options = DiffOptions::new();
+    if mode == LineMode::All {
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .show_untracked_content(true);
+    }
+    let unstaged = repo
+        .diff_index_to_workdir(None, Some(&mut options))
+        .and_then(|diff| diff.stats())
+        .map_err(|e| Error::Git(format!("working tree diff: {e}")))?;
+
+    Ok((
+        staged.insertions() + unstaged.insertions(),
+        staged.deletions() + unstaged.deletions(),
+    ))
 }
 
 fn get_upstream_info(
@@ -367,7 +401,7 @@ mod tests {
 
         run_git(tmp.path(), &["mv", "a.txt", "b.txt"]);
 
-        let info = collect(tmp.path(), 8).expect("collect info");
+        let info = collect(tmp.path(), 8, LineMode::None).expect("collect info");
         assert_eq!(info.renamed, 1);
     }
 
@@ -385,8 +419,34 @@ mod tests {
         fs::write(tmp.path().join("a.txt"), "changed").expect("modify file");
         run_git(tmp.path(), &["stash", "push", "-q", "-m", "stash-one"]);
 
-        let info = collect(tmp.path(), 8).expect("collect info");
+        let info = collect(tmp.path(), 8, LineMode::None).expect("collect info");
         assert_eq!(info.stashed, 1);
+    }
+
+    #[test]
+    fn line_modes_count_staged_unstaged_and_untracked() {
+        let tmp = TempDir::new().expect("tempdir");
+        run_git(tmp.path(), &["init", "-q"]);
+        run_git(tmp.path(), &["config", "user.name", "test"]);
+        run_git(tmp.path(), &["config", "user.email", "test@example.com"]);
+        fs::write(tmp.path().join("a.txt"), "old\nkeep\n").expect("initial file");
+        run_git(tmp.path(), &["add", "a.txt"]);
+        run_git(tmp.path(), &["commit", "-qm", "initial"]);
+
+        fs::write(tmp.path().join("a.txt"), "new\nkeep\n").expect("stage modification");
+        run_git(tmp.path(), &["add", "a.txt"]);
+        fs::write(tmp.path().join("a.txt"), "new\nkeep\nextra\n").expect("unstaged addition");
+        fs::write(tmp.path().join("b.txt"), "untracked\n").expect("untracked file");
+
+        assert_eq!(collect(tmp.path(), 8, LineMode::None).unwrap().lines, None);
+        assert_eq!(
+            collect(tmp.path(), 8, LineMode::Tracked).unwrap().lines,
+            Some((2, 1))
+        );
+        assert_eq!(
+            collect(tmp.path(), 8, LineMode::All).unwrap().lines,
+            Some((3, 1))
+        );
     }
 
     #[test]

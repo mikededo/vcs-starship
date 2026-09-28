@@ -11,6 +11,7 @@ use jj_lib::settings::UserSettings;
 use jj_lib::str_util::{StringMatcher, StringPattern};
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 /// JJ repository status info
@@ -22,6 +23,8 @@ use std::sync::Arc;
 pub struct JjInfo {
     /// Display-ready shortest change ID prefix
     pub change_id: String,
+    /// Added and removed lines in the working-copy change, when requested
+    pub lines: Option<(usize, usize)>,
     /// Bookmarks with distances: vec of (name, distance). Empty if none found.
     /// Distance 0 = directly on WC, 1+ = ancestor distance
     pub bookmarks: Vec<(String, usize)>,
@@ -246,6 +249,7 @@ pub fn collect(repo_root: &Path, ancestor_depth: usize) -> Result<JjInfo> {
 
     Ok(JjInfo {
         change_id,
+        lines: None,
         bookmarks,
         empty_desc,
         empty_commit,
@@ -254,6 +258,38 @@ pub fn collect(repo_root: &Path, ancestor_depth: usize) -> Result<JjInfo> {
         has_remote,
         is_synced,
     })
+}
+
+/// Count lines in the snapshotted working-copy change without changing the repository.
+/// JJ already auto-tracks eligible files; files excluded from its snapshot are not counted.
+pub fn collect_lines(repo_root: &Path) -> Result<(usize, usize)> {
+    let output = Command::new("jj")
+        .args(["diff", "--stat", "--ignore-working-copy", "--color=never"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| Error::Jj(format!("diff --stat: {e}")))?;
+    if !output.status.success() {
+        return Err(Error::Jj(format!(
+            "diff --stat: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    let text = String::from_utf8(output.stdout)
+        .map_err(|e| Error::Jj(format!("diff --stat output: {e}")))?;
+    let summary = text.lines().last().unwrap_or("");
+    let count = |label: &str, sign: &str| -> Result<usize> {
+        summary
+            .split(", ")
+            .find_map(|part| {
+                let prefix = part.strip_suffix(sign)?;
+                let number = prefix
+                    .strip_suffix(&format!(" {label}"))
+                    .or_else(|| prefix.strip_suffix(&format!(" {label}s")))?;
+                number.trim().parse().ok()
+            })
+            .ok_or_else(|| Error::Jj(format!("unexpected diff --stat output: {summary}")))
+    };
+    Ok((count("insertion", "(+)")?, count("deletion", "(-)")?))
 }
 
 #[cfg(test)]
@@ -307,5 +343,9 @@ mod tests {
         let collected = collect(repo_dir, 0).expect("collect JJ info");
 
         assert_eq!(collected.change_id, expected);
+
+        std::fs::write(repo_dir.join("one.txt"), "first\nsecond\n").expect("write file");
+        run_jj(repo_dir, &["status"]); // Snapshot the working copy, as JJ normally does.
+        assert_eq!(collect_lines(repo_dir).expect("line counts"), (2, 0));
     }
 }

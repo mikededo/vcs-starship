@@ -19,6 +19,23 @@ fn format_segment(text: &str, color: &str, show_color: bool) -> String {
     }
 }
 
+fn format_lines(
+    lines: Option<(usize, usize)>,
+    show_color: bool,
+    added_color: &str,
+    removed_color: &str,
+) -> Option<String> {
+    let (added, removed) = lines?;
+    if added == 0 && removed == 0 {
+        return None;
+    }
+    Some(format!(
+        "{} {}",
+        format_segment(&format!("+{added}"), added_color, show_color),
+        format_segment(&format!("-{removed}"), removed_color, show_color),
+    ))
+}
+
 /// Format shortest `change_id` output with JJ-style prefix coloring.
 fn format_change_id(change_id: &str, show_prefix_color: bool) -> String {
     if show_prefix_color {
@@ -104,6 +121,13 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
             let color = if status == "∅" { YELLOW } else { RED };
             out.push_str(&format_segment(&status_text, color, display.show_color));
         }
+    }
+
+    if let Some(lines) = format_lines(info.lines, display.show_color, GREEN, RED) {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&lines);
     }
 
     out
@@ -221,6 +245,11 @@ pub fn format_git(info: &GitInfo, config: &Config) -> String {
         }
     }
 
+    if let Some(lines) = format_lines(info.lines, display.show_color, CAT_GREEN, CAT_RED) {
+        out.push_str(&lines);
+        out.push(' ');
+    }
+
     out
 }
 
@@ -241,6 +270,7 @@ mod tests {
             strip_bookmark_prefix: Vec::new(),
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
+            lines: crate::config::LineMode::None,
             jj_display: DisplayConfig::all_visible(),
             git_display: DisplayConfig::all_visible(),
         }
@@ -250,6 +280,7 @@ mod tests {
     fn jj_format_unchanged_shape() {
         let info = JjInfo {
             change_id: "yzxv1234".into(),
+            lines: Some((4, 2)),
             bookmarks: vec![("main".into(), 0)],
             empty_desc: false,
             empty_commit: false,
@@ -258,9 +289,12 @@ mod tests {
             has_remote: false,
             is_synced: true,
         };
-        let rendered = format_jj(&info, &base_config());
+        let mut config = base_config();
+        config.jj_display.show_color = false;
+        let rendered = format_jj(&info, &config);
         assert!(rendered.contains("yzxv"));
         assert!(rendered.contains("(main)"));
+        assert!(rendered.ends_with("+4 -2"));
     }
 
     #[test]
@@ -274,6 +308,7 @@ mod tests {
     fn git_branch_remote_and_status_format() {
         let info = GitInfo {
             branch: Some("main".into()),
+            lines: Some((4, 2)),
             remote_branch: Some("origin/main".into()),
             head_short: "deadbeef".into(),
             staged: 2,
@@ -290,7 +325,8 @@ mod tests {
                 progress: None,
             }),
         };
-        let config = base_config();
+        let mut config = base_config();
+        config.git_display.show_color = false;
         let rendered = format_git(&info, &config);
         assert!(rendered.contains("[main:origin/main]"));
         assert!(rendered.contains("[merge]"));
@@ -302,12 +338,14 @@ mod tests {
         assert!(rendered.contains("⇡8 "));
         assert!(rendered.contains("*7 "));
         assert!(rendered.contains("ɍ6 "));
+        assert!(rendered.ends_with("+4 -2 "));
     }
 
     #[cfg(feature = "git")]
     #[test]
     fn git_diverged_uses_combined_token() {
         let info = GitInfo {
+            lines: None,
             branch: Some("main".into()),
             remote_branch: None,
             head_short: "deadbeef".into(),
@@ -331,6 +369,7 @@ mod tests {
     #[test]
     fn git_rebase_progress_is_rendered() {
         let info = GitInfo {
+            lines: None,
             branch: Some("main".into()),
             remote_branch: None,
             head_short: "deadbeef".into(),
@@ -360,6 +399,7 @@ mod tests {
     fn git_detached_head_fallback_uses_hash() {
         let info = GitInfo {
             branch: None,
+            lines: None,
             remote_branch: None,
             head_short: "deadbeef".into(),
             staged: 0,

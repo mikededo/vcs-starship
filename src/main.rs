@@ -12,7 +12,7 @@ mod output;
 #[cfg(feature = "git")]
 use clap::Args;
 use clap::{Parser, Subcommand};
-use config::{Config, DisplayFlags};
+use config::{Config, DisplayFlags, LineMode};
 use detect::RepoType;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,10 @@ struct Cli {
     /// Disable output styling
     #[arg(long, global = true)]
     no_color: bool,
+
+    /// Show added/removed lines: none, tracked, or all (including untracked files)
+    #[arg(long, global = true, value_enum, default_value_t = LineMode::None)]
+    lines: LineMode,
 
     /// Hide bookmark name for JJ repos
     #[arg(long, global = true)]
@@ -152,6 +156,7 @@ fn main() -> ExitCode {
         jj_symbol,
         git_symbol,
         cli.no_symbol,
+        cli.lines,
         jj_flags,
         git_flags,
     );
@@ -187,13 +192,16 @@ fn run_prompt(cwd: &Path, config: &Config) -> Option<String> {
     match result.repo_type {
         RepoType::Jj | RepoType::JjColocated => {
             let repo_root = result.repo_root?;
-            let info = jj::collect(&repo_root, config.ancestor_bookmark_depth).ok()?;
+            let mut info = jj::collect(&repo_root, config.ancestor_bookmark_depth).ok()?;
+            if config.lines != LineMode::None {
+                info.lines = Some(jj::collect_lines(&repo_root).ok()?);
+            }
             Some(output::format_jj(&info, config))
         }
         #[cfg(feature = "git")]
         RepoType::Git => {
             let repo_root = result.repo_root?;
-            let info = git::collect(&repo_root, config.id_length).ok()?;
+            let info = git::collect(&repo_root, config.id_length, config.lines).ok()?;
             Some(output::format_git(&info, config))
         }
         RepoType::None => None,
@@ -312,6 +320,7 @@ mod tests {
             cli.jj_symbol,
             None,
             cli.no_symbol,
+            cli.lines,
             DisplayFlags::default(),
             DisplayFlags::default(),
         );
@@ -335,6 +344,18 @@ mod tests {
     fn no_jj_status_flag() {
         let cli = Cli::try_parse_from(["vcs-starship", "--no-jj-status"]).unwrap();
         assert!(cli.no_jj_status);
+    }
+
+    #[test]
+    fn lines_modes() {
+        for (arg, expected) in [
+            ("none", LineMode::None),
+            ("tracked", LineMode::Tracked),
+            ("all", LineMode::All),
+        ] {
+            let cli = Cli::try_parse_from(["vcs-starship", "--lines", arg]).unwrap();
+            assert_eq!(cli.lines, expected);
+        }
     }
 
     #[test]
